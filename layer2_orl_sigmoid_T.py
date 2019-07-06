@@ -1,0 +1,194 @@
+import torch.nn as nn
+import torch as t
+import torch.nn.functional as F
+from torch.autograd import Variable
+import torch.optim as optim
+from torchvision.transforms import ToPILImage
+import matplotlib.pyplot as plt
+from torchvision.datasets import MNIST
+from torch.utils.data import DataLoader
+import torchvision
+import numpy as np
+from tensorboardX import SummaryWriter
+import cv2
+import torchvision as tv
+import torchvision.transforms as transforms
+from torch.autograd import Variable as V
+
+def imshow(img):
+		img = img / 2 + 0.5
+		npimg = img.numpy()
+		plt.imshow(np.transpose(npimg, (1, 2, 0)))
+
+
+
+class Net(nn.Module):
+	"""docstring for Net"""
+    # 28*28
+	def __init__(self):
+		super(Net, self).__init__()
+		self.fc1=nn.Linear(1932,100)
+		self.fc2=nn.Linear(100,100)
+		self.fc3=nn.Linear(100,40)
+		self.T=nn.Parameter(t.FloatTensor([1]))
+	def sigmoid(self,x):
+		#print(type(x))
+		#print(x.size())
+		#rt=1 / (1 + t.exp(-x/self.T))
+		rt=1/(1+t.exp(-x/max(self.T,0.1)))
+		return rt
+	
+	def forward(self,x):
+		x=x.view(x.size()[0],-1)
+		x=self.sigmoid(self.fc1(x))
+		x=self.sigmoid(self.fc2(x))
+		x=self.fc3(x)
+		return x
+
+if __name__ == '__main__':
+
+	epoch_num=120
+	learning_rate=0.1
+	batch_size=64
+	trans_img = transforms.ToTensor()
+	
+	transform = transforms.Compose([
+			transforms.ToTensor(), # 转为Tensor
+			transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)), # 归一化
+                             ])
+
+# 训练集
+	trainset = tv.datasets.ImageFolder(
+						root='D:/data/att_faces_fen/train', 
+						transform=transform)
+
+	trainloader = t.utils.data.DataLoader(
+						trainset, 
+						batch_size=14,
+						shuffle=True, 
+						num_workers=0)
+# 测试集
+	testset = tv.datasets.ImageFolder(
+						root='D:/data/att_faces_fen/test',
+						transform=transform)
+
+	testloader = t.utils.data.DataLoader(
+						testset,
+						batch_size=6, 
+						shuffle=False,
+						num_workers=0)
+
+	(data, label) = trainset[0]
+	print(data.size())
+	print(label)
+	print(type(torchvision.utils.make_grid(data)))
+	imshow(torchvision.utils.make_grid(data))
+	plt.show()
+
+	writer=SummaryWriter(comment='layer2_orl_sigmoid_T_0.1')
+	net=Net()
+	print(type(net))
+	print(net)
+
+	params=list(net.parameters())
+	#print(net.named_parameters)
+	#for k in net.named_parameters():
+	#	print(k)
+	
+	criterion = nn.CrossEntropyLoss() # 交叉熵损失函数
+	optimizer = optim.SGD(net.parameters(), lr=learning_rate, momentum=0.02)
+	print('start!')
+	idx=0
+	idc=0
+	total=0
+	for epoch in range(epoch_num):
+		#print(epoch)
+		correct=0
+		total=0
+		running_loss=0
+		for i,data in enumerate(trainloader, 0):
+			
+			inputs, labels = data
+			optimizer.zero_grad()
+        
+        # forward + backward 
+			outputs = net(inputs)
+			loss = criterion(outputs, labels)
+			running_loss += loss.item()
+			loss.backward()   
+			_, predicted = t.max(outputs, 1)
+			correct += (predicted == labels).sum()
+			total+=labels.size(0)
+        # 更新参数 
+			optimizer.step()
+        
+			# 打印log信息
+        # loss 是一个scalar,需要使用loss.item()来获取数值，不能使用loss[0]
+			idx=idx+1
+			if i % 20 == 19: # 每50个batch打印一下训练状态
+				print('T:',net.T.item())
+				print('[%d, %5d] loss: %.3f' \
+					 % (epoch+1, i+1, running_loss))
+				writer.add_scalar('scalar/sigmoid_T_running_loss',running_loss, idx)
+				running_loss = 0.0
+				#print(correct,total)
+				print('准确率为： %.5f %%'%(100.0*correct.float()/total))
+				writer.add_scalar('scalar/sigmoid_T_running_correct',(100.0*correct.float()/(1.0*total)), idx)
+				writer.add_scalar('scalar/sigmoid_T_T',(net.T.item()), idx)
+				correct = 0 
+				total = 0
+				#print('T:',net.T)
+		total=0
+		correct=0
+		if epoch%2==0:
+			idc=idc+1
+			#t.save(net.state_dict(), 'model_dict_zheng.pkl')
+			#print(epoch,' saved')
+			with t.no_grad():
+				test_loss=0
+				ct=0
+				for data in testloader:
+					ct=ct+1
+					images, labels = data
+					outputs = net(images)
+					_, predicted = t.max(outputs, 1)
+					total += labels.size(0)
+					correct += (predicted == labels).sum()
+					loss1=criterion(outputs, labels)
+					test_loss+=loss1.item()
+				#print(type(test_loss),type(ct))
+				print('测试loss为: %.3f'% (test_loss/ct*50))
+				print('测试准确率为： %.2f %%'%(100*correct.float()/total))
+				writer.add_scalar('scalar/sigmoid_T_test_correct',(100.0*correct.float()/(1.0*total)), idc)
+				writer.add_scalar('scalar/sigmoid_T_test_loss',test_loss/ct*50, idc)
+				
+	print('Finished Training')
+
+	dataiter = iter(testloader)
+	images, labels = dataiter.next() # 一个batch返回2张图片
+	print(type(images))
+	print(images.size())
+	print('实际的label: ', ' '.join(\
+			'%08s'%labels[j] for j in range(6)))
+	imshow(tv.utils.make_grid(images))
+	plt.show()
+
+	# 计算图片在每个类别上的分数
+	outputs = net(images)
+	# 得分最高的那个类
+	_, predicted = t.max(outputs.data, 1)
+
+	print('预测结果: ', ' '.join('%5s'\
+		% predicted[j] for j in range(6)))
+	total=0
+	correct=0
+	with t.no_grad():
+		for data in testloader:
+			images, labels = data
+			outputs = net(images)
+			_, predicted = t.max(outputs, 1)
+			total += labels.size(0)
+			correct += (predicted == labels).sum()
+
+	print('10000张测试集中的准确率为: %.2f %%' % (100 * correct.float() / total))
+	

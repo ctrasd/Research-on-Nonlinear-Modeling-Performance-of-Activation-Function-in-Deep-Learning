@@ -1,0 +1,11 @@
+x=[-10:0.1:10];
+plot(x,sigmoid(x),'LineWidth',3);
+hold on;
+plot(x,(exp(x)-exp(-x))./(exp(x)+exp(-x)),'LineWidth',3,'r');
+hold on;
+plot(x,max(0,x),'LineWidth',3);
+hold on;
+plot(x,le_relu(x),'LineWidth',3);
+hold on;
+xlabel('x');
+legend('sigmoid(x)','tanh(x)','relu(x)','leaky relu(x)');
